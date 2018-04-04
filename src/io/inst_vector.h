@@ -123,6 +123,7 @@ class InstVector {
     index_.clear();
     data_.Clear();
     label_.Clear();
+    seg_label_.Clear();
   }
     inline void setLabel(){
       dimension_ = 2;

@@ -669,6 +669,13 @@ class DefaultImageDetAugmenter : public ImageAugmenter {
     return res;
   }
 
+  cv::Mat Process(const cv::Mat &src, const cv::Mat &label, cv::Mat *out_label,
+                  common::RANDOM_ENGINE *prnd) override {
+    using mshadow::index_t;
+    cv::Mat res;
+    return res;
+  }
+
  private:
   // temporal space
   cv::Mat temp_;

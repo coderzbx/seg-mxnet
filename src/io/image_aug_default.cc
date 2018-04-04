@@ -314,42 +314,201 @@ namespace mxnet {
 
             // color space augmentation
             if (param_.random_h != 0 || param_.random_s != 0 || param_.random_l != 0) {
-                std::vector<cv::Mat> channels;
-                split(res, channels);
-                cv::Mat label_data = channels.at(3);
-                cvtColor(res, res, cv::COLOR_BGRA2BGR);
                 std::uniform_real_distribution<float> rand_uniform(0, 1);
                 cvtColor(res, res, CV_BGR2HLS);
                 int h = rand_uniform(*prnd) * param_.random_h * 2 - param_.random_h;
                 int s = rand_uniform(*prnd) * param_.random_s * 2 - param_.random_s;
-                  int l = rand_uniform(*prnd) * param_.random_l * 2 - param_.random_l;
-                  int temp[3] = {h, l, s};
-                  int limit[3] = {180, 255, 255};
-                  for (int i = 0; i < res.rows; ++i) {
-                    for (int j = 0; j < res.cols; ++j) {
-                      for (int k = 0; k < 3; ++k) {
-                        int v = res.at<cv::Vec3b>(i, j)[k];
-                        v += temp[k];
-                        v = std::max(0, std::min(limit[k], v));
-                        res.at<cv::Vec3b>(i, j)[k] = v;
-                      }
+                int l = rand_uniform(*prnd) * param_.random_l * 2 - param_.random_l;
+                int temp[3] = {h, l, s};
+                int limit[3] = {180, 255, 255};
+                for (int i = 0; i < res.rows; ++i) {
+                  for (int j = 0; j < res.cols; ++j) {
+                    for (int k = 0; k < 3; ++k) {
+                      int v = res.at<cv::Vec3b>(i, j)[k];
+                      v += temp[k];
+                      v = std::max(0, std::min(limit[k], v));
+                      res.at<cv::Vec3b>(i, j)[k] = v;
                     }
                   }
-                  cvtColor(res, res, CV_HLS2BGR);
-
-                  // merge image and label
-                  cv::Mat merge_image[] = {res, label_data};
-                  int from_to[] = {0,0, 1,1, 2,2, 3,3};
-                  cv::Mat image_label = cv::Mat(res.size(),CV_8UC4);
-                  mixChannels(merge_image, 2, &image_label, 1, from_to, 4);
-                  res = image_label;
+                }
+                cvtColor(res, res, CV_HLS2BGR);
             }
+            return res;
+          }
+
+          cv::Mat Process(const cv::Mat &src, const cv::Mat &label, cv::Mat *out_label,
+                          common::RANDOM_ENGINE *prnd) override {
+            using mshadow::index_t;
+//            int c1 = src.channels();
+//            int y1 = src.rows;
+//            int x1 = src.cols;
+//            int c2 = label.channels();
+//            int y2 = label.rows;
+//            int x2 = label.cols;
+//            std::cout<<"Image:"<<c1<<","<<x1<<","<<y1;
+//            std::cout<<"Label:"<<c2<<","<<x2<<","<<y2;
+            cv::Mat res;
+            cv::Mat res_label;
+
+            if (param_.resize != -1) {
+              int new_height, new_width;
+              if (src.rows > src.cols) {
+                new_height = param_.resize*src.rows/src.cols;
+                new_width = param_.resize;
+              } else {
+                new_height = param_.resize;
+                new_width = param_.resize*src.cols/src.rows;
+              }
+              CHECK((param_.inter_method >= 1 && param_.inter_method <= 4) ||
+               (param_.inter_method >= 9 && param_.inter_method <= 10))
+                << "invalid inter_method: valid value 0,1,2,3,9,10";
+              int interpolation_method = GetInterMethod(param_.inter_method,
+                           src.cols, src.rows, new_width, new_height, prnd);
+              cv::resize(src, res, cv::Size(new_width, new_height),
+                           0, 0, interpolation_method);
+              cv::resize(label, res_label, cv::Size(new_width, new_height),
+                           0, 0, 0);
+            } else {
+              res = src;
+              res_label = label;
+            }
+
+            // normal augmentation by affine transformation.
+            if (param_.max_rotate_angle > 0 || param_.max_shear_ratio > 0.0f
+                || param_.rotate > 0 || rotate_list_.size() > 0 || param_.max_random_scale != 1.0
+                || param_.min_random_scale != 1.0 || param_.max_aspect_ratio != 0.0f
+                || param_.max_img_size != 1e10f || param_.min_img_size != 0.0f) {
+              std::uniform_real_distribution<float> rand_uniform(0, 1);
+              // shear
+              float s = rand_uniform(*prnd) * param_.max_shear_ratio * 2 - param_.max_shear_ratio;
+              // rotate
+              int angle = std::uniform_int_distribution<int>(
+                  -param_.max_rotate_angle, param_.max_rotate_angle)(*prnd);
+              if (param_.rotate > 0) angle = param_.rotate;
+              if (rotate_list_.size() > 0) {
+                angle = rotate_list_[std::uniform_int_distribution<int>(0, rotate_list_.size() - 1)(*prnd)];
+              }
+              float a = cos(angle / 180.0 * M_PI);
+              float b = sin(angle / 180.0 * M_PI);
+              // scale
+              float scale = rand_uniform(*prnd) *
+                  (param_.max_random_scale - param_.min_random_scale) + param_.min_random_scale;
+              // aspect ratio
+              float ratio = rand_uniform(*prnd) *
+                  param_.max_aspect_ratio * 2 - param_.max_aspect_ratio + 1;
+              float hs = 2 * scale / (1 + ratio);
+              float ws = ratio * hs;
+              // new width and height
+              float new_width = std::max(param_.min_img_size,
+                                         std::min(param_.max_img_size, scale * res.cols));
+              float new_height = std::max(param_.min_img_size,
+                                          std::min(param_.max_img_size, scale * res.rows));
+              cv::Mat M(2, 3, CV_32F);
+              M.at<float>(0, 0) = hs * a - s * b * ws;
+              M.at<float>(1, 0) = -b * ws;
+              M.at<float>(0, 1) = hs * b + s * a * ws;
+              M.at<float>(1, 1) = a * ws;
+              float ori_center_width = M.at<float>(0, 0) * res.cols + M.at<float>(0, 1) * res.rows;
+              float ori_center_height = M.at<float>(1, 0) * res.cols + M.at<float>(1, 1) * res.rows;
+              M.at<float>(0, 2) = (new_width - ori_center_width) / 2;
+              M.at<float>(1, 2) = (new_height - ori_center_height) / 2;
+              CHECK((param_.inter_method >= 1 && param_.inter_method <= 4) ||
+                (param_.inter_method >= 9 && param_.inter_method <= 10))
+                 << "invalid inter_method: valid value 0,1,2,3,9,10";
+              int interpolation_method = GetInterMethod(param_.inter_method,
+                            res.cols, res.rows, new_width, new_height, prnd);
+              cv::warpAffine(res, temp_, M, cv::Size(new_width, new_height),
+                             interpolation_method,
+                             cv::BORDER_CONSTANT,
+                             cv::Scalar(param_.fill_value, param_.fill_value, param_.fill_value));
+              res = temp_;
+              cv::warpAffine(res_label, temp_label_, M, cv::Size(new_width, new_height),
+                             0,
+                             cv::BORDER_CONSTANT,
+                             cv::Scalar(255));
+              res_label = temp_label_;
+            }
+
+            // pad logic
+            if (param_.pad > 0) {
+              cv::copyMakeBorder(res, res, param_.pad, param_.pad, param_.pad, param_.pad,
+                                 cv::BORDER_CONSTANT,
+                                 cv::Scalar(param_.fill_value, param_.fill_value, param_.fill_value));
+              cv::copyMakeBorder(res_label, res_label, param_.pad, param_.pad, param_.pad, param_.pad,
+                                 cv::BORDER_CONSTANT,
+                                 cv::Scalar(255));
+            }
+
+            // crop logic
+            if (param_.max_crop_size != -1 || param_.min_crop_size != -1) {
+              CHECK(res.cols >= param_.max_crop_size && res.rows >= \
+              param_.max_crop_size && param_.max_crop_size >= param_.min_crop_size)
+                  << "input image size smaller than max_crop_size";
+              index_t rand_crop_size =
+                  std::uniform_int_distribution<index_t>(param_.min_crop_size, param_.max_crop_size)(*prnd);
+              index_t y = res.rows - rand_crop_size;
+              index_t x = res.cols - rand_crop_size;
+              if (param_.rand_crop != 0) {
+                y = std::uniform_int_distribution<index_t>(0, y)(*prnd);
+                x = std::uniform_int_distribution<index_t>(0, x)(*prnd);
+              } else {
+                y /= 2; x /= 2;
+              }
+              cv::Rect roi(x, y, rand_crop_size, rand_crop_size);
+//              std::cout<<"A-roi:"<<roi.x<<","<<roi.y<<","<<roi.width<<","<<roi.height;
+              int interpolation_method = GetInterMethod(param_.inter_method, rand_crop_size, rand_crop_size,
+                                                        param_.data_shape[2], param_.data_shape[1], prnd);
+              cv::resize(res(roi), res, cv::Size(param_.data_shape[2], param_.data_shape[1])
+                        , 0, 0, interpolation_method);
+              cv::resize(res_label(roi), res_label, cv::Size(param_.data_shape[2], param_.data_shape[1])
+                        , 0, 0, 0);
+            } else {
+              CHECK(static_cast<index_t>(res.rows) >= param_.data_shape[1]
+                    && static_cast<index_t>(res.cols) >= param_.data_shape[2])
+                  << "input image size smaller than input shape";
+              index_t y = res.rows - param_.data_shape[1];
+              index_t x = res.cols - param_.data_shape[2];
+              if (param_.rand_crop != 0) {
+                y = std::uniform_int_distribution<index_t>(0, y)(*prnd);
+                x = std::uniform_int_distribution<index_t>(0, x)(*prnd);
+              } else {
+                y /= 2; x /= 2;
+              }
+              cv::Rect roi(x, y, param_.data_shape[2], param_.data_shape[1]);
+//              std::cout<<"B-roi:"<<roi.x<<","<<roi.y<<","<<roi.width<<","<<roi.height;
+              res = res(roi);
+              res_label = res_label(roi);
+            }
+
+            // color space augmentation
+            if (param_.random_h != 0 || param_.random_s != 0 || param_.random_l != 0) {
+                std::uniform_real_distribution<float> rand_uniform(0, 1);
+                cvtColor(res, res, CV_BGR2HLS);
+                int h = rand_uniform(*prnd) * param_.random_h * 2 - param_.random_h;
+                int s = rand_uniform(*prnd) * param_.random_s * 2 - param_.random_s;
+                int l = rand_uniform(*prnd) * param_.random_l * 2 - param_.random_l;
+                int temp[3] = {h, l, s};
+                int limit[3] = {180, 255, 255};
+                for (int i = 0; i < res.rows; ++i) {
+                  for (int j = 0; j < res.cols; ++j) {
+                    for (int k = 0; k < 3; ++k) {
+                      int v = res.at<cv::Vec3b>(i, j)[k];
+                      v += temp[k];
+                      v = std::max(0, std::min(limit[k], v));
+                      res.at<cv::Vec3b>(i, j)[k] = v;
+                    }
+                  }
+                }
+                cvtColor(res, res, CV_HLS2BGR);
+            }
+            *out_label = res_label;
             return res;
           }
 
          private:
           // temporal space
           cv::Mat temp_;
+          cv::Mat temp_label_;
           // rotation param
           cv::Mat rotateM_;
           // parameters

@@ -49,6 +49,17 @@ struct ImageSegRecordIO {
       * maps image id to new labels
       */
       float label;
+
+      /*!
+      * \brief length of image raw string
+      */
+      uint32_t image_size;
+
+      /*!
+     * \brief length of label raw string
+     */
+      uint32_t label_size;
+
       /*!
        * \brief unique image index
        *  image_id[1] is always set to 0,
@@ -63,13 +74,15 @@ struct ImageSegRecordIO {
     float *label;
     /*! \brief number of float labels */
     int num_label;
+
     /*! \brief pointer to data content */
-    uint8_t *content;
-    /*! \brief size of the content */
-    size_t content_size;
+    uint8_t *image_data;
+    /*! \brief pointer to label content */
+    uint8_t *label_data;
+
     /*! \brief constructor */
     ImageSegRecordIO(void)
-            : label(NULL), num_label(0), content(NULL), content_size(0) {
+            : label(NULL), num_label(0), image_data(NULL), label_data(NULL) {
       memset(&header, 0, sizeof(header));
     }
   /*! \brief get image id from record */
@@ -85,18 +98,10 @@ struct ImageSegRecordIO {
   inline void Load(void *buf, size_t size) {
     CHECK(size >= sizeof(header));
     std::memcpy(&header, buf, sizeof(header));
-    content = reinterpret_cast<uint8_t*>(buf) + sizeof(header);
-    content_size = size - sizeof(header);
-    if (header.flag > 0) {
-      CHECK(content_size >= sizeof(float)*header.flag);
-      label = reinterpret_cast<float*>(content);
-      num_label = header.flag;
-      content = reinterpret_cast<uint8_t*>(label + header.flag);
-      content_size -= sizeof(float)*header.flag;
-    } else {
-      label = NULL;
-      num_label = 0;
-    }
+    image_data = reinterpret_cast<uint8_t*>(buf) + sizeof(header);
+//    image_data = new uint8_t[header.image_size];
+//    std::memcpy(image_data, reinterpret_cast<uint8_t*>(buf) + sizeof(header), header.image_size);
+    label_data = reinterpret_cast<uint8_t*>(buf) + sizeof(header) + header.image_size;
   }
   /*!
    * \brief save the record header

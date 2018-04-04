@@ -288,7 +288,7 @@ class MXIndexedSegRecordIO(MXSegRecordIO):
         self.keys.append(key)
 
 
-ISegRHeader = namedtuple('HEADER', ['flag', 'label', 'id', 'id2'])
+ISegRHeader = namedtuple('HEADER', ['flag', 'label', 'image_size', 'label_size', 'id', 'id2'])
 """An alias for HEADER. Used to store metadata (e.g. labels) accompanying a record.
 See mxnet.recordio.pack and mxnet.recordio.pack_img for example uses.
 
@@ -298,15 +298,19 @@ Parameters
         Available for convenience, can be set arbitrarily.
     label : float or an array of float
         Typically used to store label(s) for a record.
+    image_size: int
+        length of image string.
+    label_size: int
+        length of label string.
     id: int
         Usually a unique id representing record.
     id2: int
         Higher order bits of the unique id, should be set to 0 (in most cases).
 """
-_ISEGR_FORMAT = 'IfQQ'
+_ISEGR_FORMAT = 'IfIIQQ'
 _IR_SIZE = struct.calcsize(_ISEGR_FORMAT)
 
-def pack(header, image_data):
+def pack(header, image_data, label_data):
     """Pack a string into MXImageRecord.
 
     Parameters
@@ -315,6 +319,8 @@ def pack(header, image_data):
         Header of the image record.
     image_data : str
         Raw image string to be packed.
+    label_data : str
+        Raw label string to be packed.
 
     Returns
     -------
@@ -324,22 +330,31 @@ def pack(header, image_data):
     Examples
     --------
     >>> id = 2574
-    >>> header = mx.seg_recordio.ISegRHeader(0, 0, id, 0)
-    >>> image = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    >>> label = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
-    >>> width = image.shape[1]
-    >>> height = image.shape[0]
-    >>> image_label = np.zeros((height, width, 4), np.uint8)
-    >>> image_label[0:height, 0:width, 0] = image[0:height, 0:width, 0]
-    >>> image_label[0:height, 0:width, 1] = image[0:height, 0:width, 1]
-    >>> image_label[0:height, 0:width, 2] = image[0:height, 0:width, 2]
-    >>> image_label[0:height, 0:width, 3] = label[0:height, 0:width]
-    >>> ret, buf = cv2.imencode('.png', image_label)
+    >>> img = cv2.imread(fullpath, cv2.IMREAD_COLOR)
+    >>> ret, buf = cv2.imencode(".jpg", img)
+    >>> assert ret, 'failed to encode image'
     >>> image_data = buf.tostring()
-    >>> packed_s = mx.seg_recordio.pack(header, image_data)
+    >>> image_len = len(image_data)
+
+    >>> label_path = item[-1]
+    >>> label = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
+    >>> ret, buf = cv2.imencode(".png", label)
+    >>> assert ret, 'failed to encode label'
+    >>> label_data = buf.tostring()
+    >>> label_len = len(label_data)
+
+    >>> header = mx.seg_recordio.ISegRHeader(0, 0, image_len, label_len, id, 0)
+    >>> packed_s = mx.seg_recordio.pack(header, image_data, label_data)
     """
+    # test_s = image_data + label_data
+    # test_len = len(test_s)
+    # image_len = len(image_data)
+    # label_len = len(label_data)
     header = ISegRHeader(*header)
-    s = struct.pack(_ISEGR_FORMAT, *header) + image_data
+    s = struct.pack(_ISEGR_FORMAT, *header) + image_data + label_data
+    # total_len = len(s)
+    # if (image_len + label_len) != (header.image_size + header.label_size):
+    #     print("{}<>{}+{}".format(total_len, header.image_size, header.label_size))
     return s
 
 def unpack(s):
@@ -363,7 +378,7 @@ def unpack(s):
     >>> item = record.read()
     >>> header, s = mx.seg_recordio.unpack(item)
     >>> header
-    HEADER(flag=0, label=0, id=20129312, id2=0)
+    HEADER(flag=0, label=0, image_len=368032, label_len=38742, id=20129312, id2=0)
     """
     header = ISegRHeader(*struct.unpack(_ISEGR_FORMAT, s[:_IR_SIZE]))
     s = s[_IR_SIZE:]
@@ -409,12 +424,14 @@ def unpack_img(s, iscolor=-1):
             [166, 167, 165]]], dtype=uint8)
     """
     header, s = unpack(s)
-    img_label = np.frombuffer(s, dtype=np.uint8)
+    image_data = np.frombuffer(s, dtype=np.uint8, count=header.image_size, offset=0)
+    label_data = np.frombuffer(s, dtype=np.uint8, count=header.label_size, offset=header.image_size)
     assert cv2 is not None
-    img = cv2.imdecode(img_label, -1)
-    return header, img
+    image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+    label = cv2.imdecode(label_data, cv2.IMREAD_GRAYSCALE)
+    return header, image, label
 
-def pack_img(header, img, quality=95, img_fmt='.png'):
+def pack_img(header, img, label, quality=95, img_fmt='.jpg', label_fmt='.png'):
     """Pack an image into ``MXImageRecord``.
 
     Parameters
@@ -423,6 +440,8 @@ def pack_img(header, img, quality=95, img_fmt='.png'):
         Header of the image record.
     img : numpy.ndarray
         Image to be packed.
+    label: numpy.ndarry
+        Label to be packed
     quality : int
         Quality for JPEG encoding in range 1-100, or compression for PNG encoding in range 1-9.
     img_fmt : str
@@ -439,21 +458,43 @@ def pack_img(header, img, quality=95, img_fmt='.png'):
     --------
     >>> id = 2574
     >>> image = cv2.imread('test.jpg', cv2.IMREAD_COLOR)
+    >>> ret, buf = cv2.imencode(".jpg", img)
+    >>> assert ret, 'failed to encode image'
+    >>> image_data = buf.tostring()
+    >>> image_len = len(image_data)
+
     >>> label = cv2.imread('test.png', cv2.IMREAD_GRAYSCALE)
-    >>> header = mx.seg_recordio.ISegRHeader(0, 0.0, id, 0)
-    >>> width = image.shape[1]
-    >>> height = image.shape[0]
-    >>> blank_image = np.zeros((height, width, 4), np.uint8)
-    >>> blank_image[0:height, 0:width, 0] = image[0:height, 0:width, 0]
-    >>> blank_image[0:height, 0:width, 1] = image[0:height, 0:width, 1]
-    >>> blank_image[0:height, 0:width, 2] = image[0:height, 0:width, 2]
-    >>> blank_image[0:height, 0:width, 3] = label[0:height, 0:width]
-    >>> packed_s = mx.seg_recordio.pack_img(header, blank_image)
+    >>> ret, buf = cv2.imencode(".png", label)
+    >>> assert ret, 'failed to encode label'
+    >>> label_data = buf.tostring()
+    >>> label_len = len(label_data)
+
+    >>> header = mx.seg_recordio.ISegRHeader(0, 0, image_len, label_len, id, 0)
+    >>> packed_s = mx.seg_recordio.pack_img(header, image, label)
     """
     assert cv2 is not None
-    encode_params = [cv2.IMWRITE_PNG_COMPRESSION, quality]
+    encode_params = None
+    jpg_formats = ['.JPG', '.JPEG']
+    png_formats = ['.PNG']
+    if img_fmt.upper() in jpg_formats:
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+    elif img_fmt.upper() in png_formats:
+        encode_params = [cv2.IMWRITE_PNG_COMPRESSION, quality]
 
     ret, buf = cv2.imencode(img_fmt, img, encode_params)
     assert ret, 'failed to encode image'
     image_data = buf.tostring()
-    return pack(header, image_data)
+
+    if label_fmt.upper() in jpg_formats:
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+    elif label_fmt.upper() in png_formats:
+        encode_params = [cv2.IMWRITE_PNG_COMPRESSION, quality]
+    ret, buf = cv2.imencode(label_fmt, label, encode_params)
+    assert ret, 'failed to encode image'
+    label_data = buf.tostring()
+
+    image_len = len(image_data)
+    label_len = len(label_data)
+    header = ISegRHeader(header.flag, header.label, image_len, label_len, header.id, 0)
+
+    return pack(header, image_data, label_data)

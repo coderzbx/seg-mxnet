@@ -91,6 +91,7 @@ inline void ImageSegRecordIOParser<DType>::Init(
   {
     // be conservative, set number of real cores
     maxthread = std::max(omp_get_num_procs() / 2 - 1, 1);
+//    maxthread = std::max(omp_get_num_procs() - 1, 1);
   }
   param_.preprocess_threads = std::min(maxthread, param_.preprocess_threads);
   #pragma omp parallel num_threads(param_.preprocess_threads)
@@ -180,20 +181,27 @@ ParseNext(std::vector<InstVector<DType>> *out_vec) {
     while (reader.NextRecord(&blob)) {
       // Opencv decode and augments
       cv::Mat res;
+      cv::Mat res_label;
       rec.Load(blob.dptr, blob.size);
-      cv::Mat buf(1, rec.content_size, CV_8U, rec.content);
+
+      cv::Mat buf(1, rec.header.image_size, CV_8U, rec.image_data);
+      cv::Mat buf_label(1, rec.header.label_size, CV_8U, rec.label_data);
+
       // -1 to keep the number of channel of the encoded image, and not force gray or color.
-      res = cv::imdecode(buf, -1);
-      CHECK_EQ(res.channels(), 4)
+      res = cv::imdecode(buf, cv::IMREAD_COLOR);
+      res_label = cv::imdecode(buf_label, cv::IMREAD_GRAYSCALE);
+
+      CHECK_EQ(res.channels(), 3)
         << "Invalid image with index " << rec.image_index()
-        << ". Expected 4 channels, got " << res.channels();
+        << ". Expected 3 channels, got " << res.channels();
       const int n_channels = res.channels();
+      cv::Mat out_label;
       for (auto& aug : augmenters_[tid]) {
-        res = aug->Process(res, nullptr, prnds_[tid].get());
+        res = aug->Process(res, res_label, &out_label, prnds_[tid].get());
       }
       out.Push(static_cast<unsigned>(rec.image_index()),
-               mshadow::Shape3((n_channels-1), res.rows, res.cols),
-               mshadow::Shape2(/*param_.label_width*/res.rows, res.cols));
+               mshadow::Shape3(n_channels, res.rows, res.cols),
+               mshadow::Shape2(out_label.rows, out_label.cols));
 
       mshadow::Tensor<cpu, 3, DType> data = out.data().Back();
       mshadow::Tensor<cpu, 2> label = out.label(2).Back();
@@ -209,16 +217,20 @@ ParseNext(std::vector<InstVector<DType>> *out_vec) {
         uchar* im_data = res.ptr<uchar>(i);
         for (int j = 0; j < res.cols; ++j) {
           for (int k = 0; k < n_channels; ++k) {
-              if (k == n_channels - 1){
-                label[i][j] = im_data[swap_indices[k]];
-              }else{
-                data[k][i][j] = im_data[swap_indices[k]];
-              }
+              data[k][i][j] = im_data[swap_indices[k]];
           }
           im_data += n_channels;
         }
       }
+      for (int i = 0; i < out_label.rows; ++i) {
+        uchar* im_data = out_label.ptr<uchar>(i);
+        for (int j = 0; j < out_label.cols; ++j) {
+          label[i][j] = im_data[j];
+        }
+      }
       res.release();
+      res_label.release();
+      out_label.release();
     }
   }
 #else
@@ -253,7 +265,11 @@ class ImageSegRecordIter : public IIterator<DataInst> {
       },
       [this]() { parser_.BeforeFirst(); });
     inst_ptr_ = 0;
-    rnd_.seed(kRandMagic + param_.seed);
+    if (param_.seed != -1){
+      rnd_.seed(kRandMagic + rand());
+    }else{
+      rnd_.seed(kRandMagic + param_.seed);
+    }
   }
   // before first
   virtual void BeforeFirst(void) {
