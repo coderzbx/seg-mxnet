@@ -38,5 +38,6 @@ DMLC_REGISTER_PARAMETER(ImageNormalizeParam);
 DMLC_REGISTER_PARAMETER(ImageRecParserParam);
 DMLC_REGISTER_PARAMETER(ImageRecordParam);
 DMLC_REGISTER_PARAMETER(ImageDetNormalizeParam);
+DMLC_REGISTER_PARAMETER(ImageSegNormalizeParam);
 }  // namespace io
 }  // namespace mxnet

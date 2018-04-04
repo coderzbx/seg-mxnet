@@ -35,6 +35,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstdlib>
+#include <string>
 #include "./image_iter_common.h"
 #include "./inst_vector.h"
 #include "./image_seg_recordio.h"
@@ -64,7 +65,7 @@ class ImageSegRecordIOParser {
   // magic number to see prng
   static const int kRandMagic = 111;
   /*! \brief parameters */
-  ImageRecParserParam param_;
+  ImageSegRecParserParam param_;
   #if MXNET_USE_OPENCV
   /*! \brief augmenters */
   std::vector<std::vector<std::unique_ptr<ImageAugmenter> > > augmenters_;
@@ -325,37 +326,27 @@ class ImageSegRecordIter : public IIterator<DataInst> {
   // backend thread
   dmlc::ThreadedIter<std::vector<InstVector<DType>> > iter_;
   // parameters
-  ImageRecordParam param_;
+  ImageSegRecordParam param_;
   // random number generator
   common::RANDOM_ENGINE rnd_;
 };
 
+DMLC_REGISTER_PARAMETER(ImageSegRecParserParam);
+DMLC_REGISTER_PARAMETER(ImageSegRecordParam);
+
 // OLD VERSION - DEPRECATED
 MXNET_REGISTER_IO_ITER(ImageSegRecordIter)
-.describe(R"code(Iterating on image RecordIO files
-
-.. note::
-
-  ``ImageRecordIter_v1`` is deprecated. Use ``ImageRecordIter`` instead.
-
-
-Read images batches from RecordIO files with a rich of data augmentation
-options.
-
-One can use ``tools/im2rec.py`` to pack individual image files into RecordIO
-files.
-
-)code" ADD_FILELINE)
-.add_arguments(ImageRecParserParam::__FIELDS__())
-.add_arguments(ImageRecordParam::__FIELDS__())
+.describe("Create iterator for image segmentation dataset packed in seg_recordio.")
+.add_arguments(ImageSegRecParserParam::__FIELDS__())
+.add_arguments(ImageSegRecordParam::__FIELDS__())
 .add_arguments(BatchParam::__FIELDS__())
 .add_arguments(PrefetcherParam::__FIELDS__())
-.add_arguments(ListDefaultAugParams())
-.add_arguments(ImageNormalizeParam::__FIELDS__())
+.add_arguments(ListDefaultSegAugParams())
+.add_arguments(ImageSegNormalizeParam::__FIELDS__())
 .set_body([]() {
     return new PrefetcherIter(
         new BatchLoader(
-            new SegImageNormalizeIter(
+            new ImageSegNormalizeIter(
                 new ImageSegRecordIter<real_t>())));
   });
 }  // namespace io

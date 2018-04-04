@@ -210,8 +210,6 @@ struct ImageNormalizeParam :  public dmlc::Parameter<ImageNormalizeParam> {
   bool mirror;
   /*! \brief whether to perform rand mirror the image */
   bool rand_mirror;
-  /*! \brief whether to perform rand mirror the image */
-  float rand_mirror_prob;
   /*! \brief mean file string */
   std::string mean_img;
   /*! \brief mean value for r channel */
@@ -333,6 +331,172 @@ struct ImageDetNormalizeParam :  public dmlc::Parameter<ImageDetNormalizeParam> 
     DMLC_DECLARE_FIELD(verbose).set_default(true)
         .describe("Augmentation Param: Whether to print augmentor info.");
   }
+};
+
+// Define image record parser parameters
+struct ImageSegRecParserParam : public dmlc::Parameter<ImageSegRecParserParam> {
+    /*! \brief path to image list */
+    std::string path_imglist;
+    /*! \brief path to image recordio */
+    std::string path_imgrec;
+    /*! \brief path to index file */
+    std::string path_imgidx;
+    /*! \brief a sequence of names of image augmenters, seperated by , */
+    std::string aug_seq;
+    /*! \brief label-width */
+    int label_width;
+    /*! \brief input shape */
+    TShape data_shape;
+    /*! \brief input label shape */
+    TShape label_shape;
+    /*! \brief number of threads */
+    int preprocess_threads;
+    /*! \brief whether to remain silent */
+    bool verbose;
+    /*! \brief partition the data into multiple parts */
+    int num_parts;
+    /*! \brief the index of the part will read*/
+    int part_index;
+    /*! \brief the size of a shuffle chunk*/
+    size_t shuffle_chunk_size;
+    /*! \brief the seed for chunk shuffling*/
+    int shuffle_chunk_seed;
+
+    // declare parameters
+    DMLC_DECLARE_PARAMETER(ImageSegRecParserParam) {
+            DMLC_DECLARE_FIELD(path_imglist).set_default("")
+                    .describe("Path to the image list (.lst) file. Generally created with tools/im2rec.py. "\
+              "Format (Tab separated): "\
+              "<index of record>\t<one or more labels>\t<relative path from root folder>.");
+            DMLC_DECLARE_FIELD(path_imgrec).set_default("")
+            .describe("Path to the image RecordIO (.rec) file or a directory path. "\
+              "Created with tools/im2rec.py.");
+            DMLC_DECLARE_FIELD(path_imgidx).set_default("")
+            .describe("Path to the image RecordIO index (.idx) file. "\
+              "Created with tools/im2rec.py.");
+            DMLC_DECLARE_FIELD(aug_seq).set_default("seg_aug_default")
+            .describe("The augmenter names to represent"\
+              " sequence of augmenters to be applied, seperated by comma." \
+              " Additional keyword parameters will be seen by these augmenters.");
+            DMLC_DECLARE_FIELD(label_width).set_lower_bound(1).set_default(1)
+            .describe("The number of labels per image.");
+            DMLC_DECLARE_FIELD(data_shape)
+            .set_expect_ndim(3).enforce_nonzero()
+            .describe("The shape of one output image in (channels, height, width) format.");
+            DMLC_DECLARE_FIELD(preprocess_threads).set_lower_bound(1).set_default(4)
+            .describe("The number of threads to do preprocessing.");
+            DMLC_DECLARE_FIELD(verbose).set_default(true)
+            .describe("If or not output verbose information.");
+            DMLC_DECLARE_FIELD(num_parts).set_default(1)
+            .describe("Virtually partition the data into these many parts.");
+            DMLC_DECLARE_FIELD(part_index).set_default(0)
+            .describe("The *i*-th virtual partition to be read.");
+            DMLC_DECLARE_FIELD(shuffle_chunk_size).set_default(0)
+            .describe("The data shuffle buffer size in MB. Only valid if shuffle is true.");
+            DMLC_DECLARE_FIELD(shuffle_chunk_seed).set_default(0)
+            .describe("The random seed for shuffling");
+    }
+};
+
+// Define image record parameters
+struct ImageSegRecordParam: public dmlc::Parameter<ImageSegRecordParam> {
+    /*! \brief whether to do shuffle */
+    bool shuffle;
+    /*! \brief random seed */
+    int seed;
+    /*! \brief whether to remain silent */
+    bool verbose;
+    // declare parameters
+    DMLC_DECLARE_PARAMETER(ImageSegRecordParam) {
+        DMLC_DECLARE_FIELD(shuffle).set_default(false)
+                .describe("Whether to shuffle data randomly or not.");
+        DMLC_DECLARE_FIELD(seed).set_default(0)
+        .describe("The random seed.");
+        DMLC_DECLARE_FIELD(verbose).set_default(true)
+        .describe("Whether to output verbose information or not.");
+    }
+};
+
+// normalize parameters
+struct ImageSegNormalizeParam :  public dmlc::Parameter<ImageSegNormalizeParam> {
+    /*! \brief random seed */
+    int seed;
+    /*! \brief whether to mirror the image */
+    bool mirror;
+    /*! \brief whether to perform rand mirror the image */
+    bool rand_mirror;
+    /*! \brief whether to perform rand mirror the image */
+    float rand_mirror_prob;
+    /*! \brief mean file string */
+    std::string mean_img;
+    /*! \brief mean value for r channel */
+    float mean_r;
+    /*! \brief mean value for g channel */
+    float mean_g;
+    /*! \brief mean value for b channel */
+    float mean_b;
+    /*! \brief mean value for alpha channel */
+    float mean_a;
+    /*! \brief standard deviation for r channel */
+    float std_r;
+    /*! \brief standard deviation for g channel */
+    float std_g;
+    /*! \brief standard deviation for b channel */
+    float std_b;
+    /*! \brief standard deviation for alpha channel */
+    float std_a;
+    /*! \brief scale on color space */
+    float scale;
+    /*! \brief maximum ratio of contrast variation */
+    float max_random_contrast;
+    /*! \brief maximum value of illumination variation */
+    float max_random_illumination;
+    /*! \brief silent */
+    bool verbose;
+    // declare parameters
+    DMLC_DECLARE_PARAMETER(ImageSegNormalizeParam) {
+        DMLC_DECLARE_FIELD(seed).set_default(0)
+                .describe("The random seed.");
+        DMLC_DECLARE_FIELD(mirror).set_default(false)
+        .describe("Whether to mirror the image or not. If true, images are "\
+          "flipped along the horizontal axis.");
+        DMLC_DECLARE_FIELD(rand_mirror).set_default(false)
+        .describe("Whether to randomly mirror images or not. If true, 50% of "\
+          "the images will be randomly mirrored (flipped along the "\
+          "horizontal axis)");
+        DMLC_DECLARE_FIELD(rand_mirror_prob).set_default(0.5f)
+        .describe("Whether to randomly mirror images or not. If true, 50% of "\
+          "the images will be randomly mirrored (flipped along the "\
+          "horizontal axis)");
+        DMLC_DECLARE_FIELD(mean_img).set_default("")
+        .describe("Filename of the mean image.");
+        DMLC_DECLARE_FIELD(mean_r).set_default(0.0f)
+        .describe("The mean value to be subtracted on the R channel");
+        DMLC_DECLARE_FIELD(mean_g).set_default(0.0f)
+        .describe("The mean value to be subtracted on the G channel");
+        DMLC_DECLARE_FIELD(mean_b).set_default(0.0f)
+        .describe("The mean value to be subtracted on the B channel");
+        DMLC_DECLARE_FIELD(mean_a).set_default(0.0f)
+        .describe("The mean value to be subtracted on the alpha channel");
+        DMLC_DECLARE_FIELD(std_r).set_default(1.0f)
+        .describe("Augmentation Param: Standard deviation on R channel.");
+        DMLC_DECLARE_FIELD(std_g).set_default(1.0f)
+        .describe("Augmentation Param: Standard deviation on G channel.");
+        DMLC_DECLARE_FIELD(std_b).set_default(1.0f)
+        .describe("Augmentation Param: Standard deviation on B channel.");
+        DMLC_DECLARE_FIELD(std_a).set_default(1.0f)
+        .describe("Augmentation Param: Standard deviation on Alpha channel.");
+        DMLC_DECLARE_FIELD(scale).set_default(1.0f)
+        .describe("Multiply the image with a scale value.");
+        DMLC_DECLARE_FIELD(max_random_contrast).set_default(0.0f)
+        .describe("Change the contrast with a value randomly chosen from "
+        "``[-max_random_contrast, max_random_contrast]``");
+        DMLC_DECLARE_FIELD(max_random_illumination).set_default(0.0f)
+        .describe("Change the illumination with a value randomly chosen from "
+        "``[-max_random_illumination, max_random_illumination]``");
+        DMLC_DECLARE_FIELD(verbose).set_default(true)
+        .describe("If or not output verbose information.");
+    }
 };
 
 // Define prefetcher parameters

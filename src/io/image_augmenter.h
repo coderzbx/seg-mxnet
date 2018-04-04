@@ -60,18 +60,8 @@ class ImageAugmenter {
   virtual cv::Mat Process(const cv::Mat &src, std::vector<float> *label,
                           common::RANDOM_ENGINE *prnd) = 0;
 
-  /*!
-   * \brief augment src image.
-   *   this function is not thread safe, and will only be called by one thread
-   *   however, it will tries to re-use memory space as much as possible
-   * \param src the source image
-   * \param label the label
-   * \param prnd pointer to random number generator.
-   * \return The processed image and label.
-   */
   virtual cv::Mat Process(const cv::Mat &src, const cv::Mat &label, cv::Mat *out_label,
-                          common::RANDOM_ENGINE *prnd) = 0;
-
+                  common::RANDOM_ENGINE *prnd) = 0;
   // virtual destructor
   virtual ~ImageAugmenter() {}
   /*!
@@ -113,10 +103,11 @@ struct ImageAugmenterReg
 #endif  // MXNET_USE_OPENCV
 
 namespace mxnet {
-namespace io {
+    namespace io {
 /*! \return the parameter of default augmenter */
-std::vector<dmlc::ParamFieldInfo> ListDefaultAugParams();
-std::vector<dmlc::ParamFieldInfo> ListDefaultDetAugParams();
-}  // namespace io
+        std::vector<dmlc::ParamFieldInfo> ListDefaultAugParams();
+        std::vector<dmlc::ParamFieldInfo> ListDefaultDetAugParams();
+        std::vector<dmlc::ParamFieldInfo> ListDefaultSegAugParams();
+    }  // namespace io
 }  // namespace mxnet
 #endif  // MXNET_IO_IMAGE_AUGMENTER_H_
