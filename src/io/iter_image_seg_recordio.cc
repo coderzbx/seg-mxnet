@@ -355,7 +355,7 @@ files.
 .set_body([]() {
     return new PrefetcherIter(
         new BatchLoader(
-            new ImageNormalizeIter(
+            new SegImageNormalizeIter(
                 new ImageSegRecordIter<real_t>())));
   });
 }  // namespace io

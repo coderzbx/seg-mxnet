@@ -210,6 +210,8 @@ struct ImageNormalizeParam :  public dmlc::Parameter<ImageNormalizeParam> {
   bool mirror;
   /*! \brief whether to perform rand mirror the image */
   bool rand_mirror;
+  /*! \brief whether to perform rand mirror the image */
+  float rand_mirror_prob;
   /*! \brief mean file string */
   std::string mean_img;
   /*! \brief mean value for r channel */

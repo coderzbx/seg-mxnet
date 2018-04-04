@@ -78,6 +78,14 @@ namespace mxnet {
             int inter_method;
             /*! \brief padding size */
             int pad;
+            /*! \brief whether we do random mirror */
+            bool rand_mirror;
+            /*! \brief random mirror prob */
+            float rand_mirror_prob;
+            /*! \brief left lane class id */
+            int left_lane_id;
+            /*! \brief right lane class id */
+            int right_lane_id;
             /*! \brief shape of the image data*/
             TShape data_shape;
             // declare parameters
@@ -136,6 +144,14 @@ namespace mxnet {
                     DMLC_DECLARE_FIELD(pad).set_default(0)
                     .describe("Change size from ``[width, height]`` into "
                     "``[pad + width + pad, pad + height + pad]`` by padding pixes");
+                    DMLC_DECLARE_FIELD(rand_mirror).set_default(false)
+                    .describe("Augmentation Param: Probability to apply horizontal flip aka. mirror.");
+                    DMLC_DECLARE_FIELD(rand_mirror_prob).set_default(0.0f)
+                    .describe("Augmentation Param: Probability to apply horizontal flip aka. mirror.");
+                    DMLC_DECLARE_FIELD(left_lane_id).set_default(-1)
+                    .describe("Switch left_lane_id and right_lane_id if need to flip");
+                    DMLC_DECLARE_FIELD(right_lane_id).set_default(-1)
+                    .describe("Switch left_lane_id and right_lane_id if need to flip");
             }
         };
 
@@ -339,14 +355,6 @@ namespace mxnet {
           cv::Mat Process(const cv::Mat &src, const cv::Mat &label, cv::Mat *out_label,
                           common::RANDOM_ENGINE *prnd) override {
             using mshadow::index_t;
-//            int c1 = src.channels();
-//            int y1 = src.rows;
-//            int x1 = src.cols;
-//            int c2 = label.channels();
-//            int y2 = label.rows;
-//            int x2 = label.cols;
-//            std::cout<<"Image:"<<c1<<","<<x1<<","<<y1;
-//            std::cout<<"Label:"<<c2<<","<<x2<<","<<y2;
             cv::Mat res;
             cv::Mat res_label;
 
@@ -478,6 +486,30 @@ namespace mxnet {
 //              std::cout<<"B-roi:"<<roi.x<<","<<roi.y<<","<<roi.width<<","<<roi.height;
               res = res(roi);
               res_label = res_label(roi);
+            }
+
+            // random mirror logic
+            if (param_.rand_mirror) {
+                // random engine
+                std::uniform_real_distribution<float> rand_uniform(0, 1);
+                if (param_.rand_mirror_prob > 0 && rand_uniform(*prnd) < param_.rand_mirror_prob){
+                    // flip label
+                    cv::flip(res_label, temp_label_, 1);
+                    res_label = temp_label_;
+                    // flip image
+                    cv::flip(res, temp_, 1);
+                    res = temp_;
+
+                    //switch left and right lane
+                    if (param_.left_lane_id >= 0 && param_.left_lane_id < 255 &&
+                        param_.right_lane_id >= 0 && param_.right_lane_id < 255 &&
+                        param_.left_lane_id != param_.right_lane_id){
+                        cv::Mat left_mask = res_label == param_.left_lane_id;
+                        cv::Mat right_mask = res_label == param_.right_lane_id;
+                        res_label.setTo(param_.right_lane_id, left_mask);
+                        res_label.setTo(param_.left_lane_id, right_mask);
+                    }
+                }
             }
 
             // color space augmentation
