@@ -383,6 +383,9 @@ struct ImageSegRecParserParam : public dmlc::Parameter<ImageSegRecParserParam> {
             DMLC_DECLARE_FIELD(data_shape)
             .set_expect_ndim(3).enforce_nonzero()
             .describe("The shape of one output image in (channels, height, width) format.");
+            DMLC_DECLARE_FIELD(label_shape)
+            .set_expect_ndim(2)
+            .describe("The shape of one output label in (height, width) format.");
             DMLC_DECLARE_FIELD(preprocess_threads).set_lower_bound(1).set_default(4)
             .describe("The number of threads to do preprocessing.");
             DMLC_DECLARE_FIELD(verbose).set_default(true)
