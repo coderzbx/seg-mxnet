@@ -1,28 +1,10 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-
 /*!
  *  Copyright (c) 2015 by Contributors
  * \file image_seg_aug_default.cc
  * \brief Segmentation augmenter.
  */
 #include <mxnet/base.h>
+#include <cmath>
 #include <utility>
 #include <string>
 #include <algorithm>
@@ -43,6 +25,8 @@ struct ImageSegAugmentParam : public dmlc::Parameter<ImageSegAugmentParam> {
     int max_rotate_angle;
     /*! \brief max aspect ratio */
     float max_aspect_ratio;
+    /*! \brief min aspect ratio */
+    float min_aspect_ratio;
     /*! \brief random shear the image [-max_shear_ratio, max_shear_ratio] */
     float max_shear_ratio;
     /*! \brief max crop size */
@@ -81,6 +65,7 @@ struct ImageSegAugmentParam : public dmlc::Parameter<ImageSegAugmentParam> {
     int right_lane_id;
     /*! \brief shape of the image data*/
     TShape data_shape;
+
     // declare parameters
     DMLC_DECLARE_PARAMETER(ImageSegAugmentParam) {
             DMLC_DECLARE_FIELD(resize).set_default(-1)
@@ -90,9 +75,12 @@ struct ImageSegAugmentParam : public dmlc::Parameter<ImageSegAugmentParam> {
             .describe("If or not randomly crop the image");
             DMLC_DECLARE_FIELD(max_rotate_angle).set_default(0.0f)
             .describe("Rotate by a random degree in ``[-v, v]``");
-            DMLC_DECLARE_FIELD(max_aspect_ratio).set_default(0.0f)
+            DMLC_DECLARE_FIELD(max_aspect_ratio).set_default(1.0f)
             .describe("Change the aspect (namely width/height) to a random value "
-            "in ``[1 - max_aspect_ratio, 1 + max_aspect_ratio]``");
+            "in ``[min_aspect_ratio, max_aspect_ratio]``");
+            DMLC_DECLARE_FIELD(min_aspect_ratio).set_default(0.1f)
+            .describe("Change the aspect (namely width/height) to a random value "
+            "in ``[min_aspect_ratio, max_aspect_ratio]``");
             DMLC_DECLARE_FIELD(max_shear_ratio).set_default(0.0f)
             .describe("Apply a shear transformation (namely ``(x,y)->(x+my,y)``) "
             "with ``m`` randomly chose from "
@@ -139,7 +127,7 @@ struct ImageSegAugmentParam : public dmlc::Parameter<ImageSegAugmentParam> {
             "``[pad + width + pad, pad + height + pad]`` by padding pixes");
             DMLC_DECLARE_FIELD(rand_mirror).set_default(false)
             .describe("Augmentation Param: Probability to apply horizontal flip aka. mirror.");
-            DMLC_DECLARE_FIELD(rand_mirror_prob).set_default(0.0f)
+            DMLC_DECLARE_FIELD(rand_mirror_prob).set_default(0.5f)
             .describe("Augmentation Param: Probability to apply horizontal flip aka. mirror.");
             DMLC_DECLARE_FIELD(left_lane_id).set_default(-1)
             .describe("Switch left_lane_id and right_lane_id if need to flip");
@@ -360,9 +348,9 @@ class ImageSegAugmenter : public ImageAugmenter {
         new_height = param_.resize;
         new_width = param_.resize*src.cols/src.rows;
       }
-      CHECK((param_.inter_method >= 1 && param_.inter_method <= 4) ||
-       (param_.inter_method >= 9 && param_.inter_method <= 10))
-        << "invalid inter_method: valid value 0,1,2,3,9,10";
+      CHECK((param_.inter_method >= 0 && param_.inter_method <= 4) ||
+            (param_.inter_method >= 9 && param_.inter_method <= 10))
+        << "invalid inter_method: valid value 0,1,2,3,4,9,10";
       int interpolation_method = GetInterMethod(param_.inter_method,
                    src.cols, src.rows, new_width, new_height, prnd);
       cv::resize(src, res, cv::Size(new_width, new_height),
@@ -374,63 +362,37 @@ class ImageSegAugmenter : public ImageAugmenter {
       res_label = label;
     }
 
-    // normal augmentation by affine transformation.
-    if (param_.max_rotate_angle > 0 || param_.max_shear_ratio > 0.0f
-        || param_.rotate > 0 || rotate_list_.size() > 0 || param_.max_random_scale != 1.0
-        || param_.min_random_scale != 1.0 || param_.max_aspect_ratio != 0.0f
-        || param_.max_img_size != 1e10f || param_.min_img_size != 0.0f) {
+    // Crop random scale and aspect-ratio patch
+    if (param_.max_random_scale != 1.0 || param_.min_random_scale != 1.0
+        || (param_.max_aspect_ratio > 0.0f && param_.min_aspect_ratio > 0.0f)) {
       std::uniform_real_distribution<float> rand_uniform(0, 1);
-      // shear
-      float s = rand_uniform(*prnd) * param_.max_shear_ratio * 2 - param_.max_shear_ratio;
-      // rotate
-      int angle = std::uniform_int_distribution<int>(
-          -param_.max_rotate_angle, param_.max_rotate_angle)(*prnd);
-      if (param_.rotate > 0) angle = param_.rotate;
-      if (rotate_list_.size() > 0) {
-        angle = rotate_list_[std::uniform_int_distribution<int>(0, rotate_list_.size() - 1)(*prnd)];
-      }
-      float a = cos(angle / 180.0 * M_PI);
-      float b = sin(angle / 180.0 * M_PI);
-      // scale
-      float scale = rand_uniform(*prnd) *
+      float scale(1.0);
+      if (param_.max_random_scale >= param_.min_random_scale) {
+        scale = rand_uniform(*prnd) *
           (param_.max_random_scale - param_.min_random_scale) + param_.min_random_scale;
-      // aspect ratio
-      float ratio = rand_uniform(*prnd) *
-          param_.max_aspect_ratio * 2 - param_.max_aspect_ratio + 1;
-      float hs = 2 * scale / (1 + ratio);
-      float ws = ratio * hs;
-      // new width and height
-      float new_width = std::max(param_.min_img_size,
-                                 std::min(param_.max_img_size, scale * res.cols));
-      float new_height = std::max(param_.min_img_size,
-                                  std::min(param_.max_img_size, scale * res.rows));
-      cv::Mat M(2, 3, CV_32F);
-      M.at<float>(0, 0) = hs * a - s * b * ws;
-      M.at<float>(1, 0) = -b * ws;
-      M.at<float>(0, 1) = hs * b + s * a * ws;
-      M.at<float>(1, 1) = a * ws;
-      float ori_center_width = M.at<float>(0, 0) * res.cols + M.at<float>(0, 1) * res.rows;
-      float ori_center_height = M.at<float>(1, 0) * res.cols + M.at<float>(1, 1) * res.rows;
-      M.at<float>(0, 2) = (new_width - ori_center_width) / 2;
-      M.at<float>(1, 2) = (new_height - ori_center_height) / 2;
-      CHECK((param_.inter_method >= 1 && param_.inter_method <= 4) ||
-        (param_.inter_method >= 9 && param_.inter_method <= 10))
-         << "invalid inter_method: valid value 0,1,2,3,9,10";
-      int interpolation_method = GetInterMethod(param_.inter_method,
-                    res.cols, res.rows, new_width, new_height, prnd);
-      cv::warpAffine(res, temp_, M, cv::Size(new_width, new_height),
-                     interpolation_method,
-                     cv::BORDER_CONSTANT,
-                     cv::Scalar(param_.fill_value, param_.fill_value, param_.fill_value));
-      res = temp_;
-      cv::warpAffine(res_label, temp_label_, M, cv::Size(new_width, new_height),
-                     0,
-                     cv::BORDER_CONSTANT,
-                     cv::Scalar(255));
-      res_label = temp_label_;
+      }
+      float ratio(1.0);
+      float min_ratio = std::max(param_.min_aspect_ratio, scale * scale);
+      float max_ratio = std::min(param_.max_aspect_ratio, float(1.0 / scale / scale));
+      if (max_ratio > min_ratio) {
+        ratio = std::sqrt(rand_uniform(*prnd) * (max_ratio - min_ratio) + min_ratio);
+      }
+      float ws = scale * ratio;
+      float hs = scale / ratio;
+      // [0, 1 - ws], [0, 1 - hs]
+      float left = rand_uniform(*prnd) * (1 - ws);
+      float top = rand_uniform(*prnd) * (1 - hs);
+
+      // Crop it
+      int width = res.cols;
+      int height = res.rows;
+      cv::Rect roi(static_cast<int>(left * width), static_cast<int>(top * height),
+                   static_cast<int>(ws * width), static_cast<int>(hs * height));
+      res = res(roi);
+      res_label = res_label(roi);
     }
 
-    // pad logic
+    // pad logic or not, usually set zero
     if (param_.pad > 0) {
       cv::copyMakeBorder(res, res, param_.pad, param_.pad, param_.pad, param_.pad,
                          cv::BORDER_CONSTANT,
@@ -440,63 +402,20 @@ class ImageSegAugmenter : public ImageAugmenter {
                          cv::Scalar(255));
     }
 
-    // crop logic
-    if (param_.max_crop_size != -1 || param_.min_crop_size != -1) {
-      CHECK(res.cols >= param_.max_crop_size && res.rows >= \
-      param_.max_crop_size && param_.max_crop_size >= param_.min_crop_size)
-          << "input image size smaller than max_crop_size";
-      index_t rand_crop_size =
-          std::uniform_int_distribution<index_t>(param_.min_crop_size, param_.max_crop_size)(*prnd);
-      index_t y = res.rows - rand_crop_size;
-      index_t x = res.cols - rand_crop_size;
-      if (param_.rand_crop != 0) {
-        y = std::uniform_int_distribution<index_t>(0, y)(*prnd);
-        x = std::uniform_int_distribution<index_t>(0, x)(*prnd);
-      } else {
-        y /= 2; x /= 2;
-      }
-      cv::Rect roi(x, y, rand_crop_size, rand_crop_size);
-//              std::cout<<"A-roi:"<<roi.x<<","<<roi.y<<","<<roi.width<<","<<roi.height;
-      int interpolation_method = GetInterMethod(param_.inter_method, rand_crop_size, rand_crop_size,
-                                                param_.data_shape[2], param_.data_shape[1], prnd);
-      cv::resize(res(roi), res, cv::Size(param_.data_shape[2], param_.data_shape[1])
-                , 0, 0, interpolation_method);
-      cv::resize(res_label(roi), res_label, cv::Size(param_.data_shape[2], param_.data_shape[1])
-                , 0, 0, 0);
-    } else {
-      CHECK(static_cast<index_t>(res.rows) >= param_.data_shape[1]
-            && static_cast<index_t>(res.cols) >= param_.data_shape[2])
-          << "input image size smaller than input shape";
-      index_t y = res.rows - param_.data_shape[1];
-      index_t x = res.cols - param_.data_shape[2];
-      if (param_.rand_crop != 0) {
-        y = std::uniform_int_distribution<index_t>(0, y)(*prnd);
-        x = std::uniform_int_distribution<index_t>(0, x)(*prnd);
-      } else {
-        y /= 2; x /= 2;
-      }
-      cv::Rect roi(x, y, param_.data_shape[2], param_.data_shape[1]);
-//              std::cout<<"B-roi:"<<roi.x<<","<<roi.y<<","<<roi.width<<","<<roi.height;
-      res = res(roi);
-      res_label = res_label(roi);
-    }
-
     // random mirror logic
-    if (param_.rand_mirror) {
-        // random engine
+    if (param_.rand_mirror_prob > 0.0f && param_.rand_mirror_prob <= 1.0f) {
         std::uniform_real_distribution<float> rand_uniform(0, 1);
-        if (param_.rand_mirror_prob > 0 && rand_uniform(*prnd) < param_.rand_mirror_prob){
-            // flip label
-            cv::flip(res_label, temp_label_, 1);
-            res_label = temp_label_;
+        if (rand_uniform(*prnd) < param_.rand_mirror_prob){
             // flip image
             cv::flip(res, temp_, 1);
             res = temp_;
-
+            // flip label
+            cv::flip(res_label, temp_label_, 1);
+            res_label = temp_label_;
             //switch left and right lane
-            if (param_.left_lane_id >= 0 && param_.left_lane_id < 255 &&
-                param_.right_lane_id >= 0 && param_.right_lane_id < 255 &&
-                param_.left_lane_id != param_.right_lane_id){
+            if (param_.left_lane_id >= 0 && param_.left_lane_id < 255
+                && param_.right_lane_id >= 0 && param_.right_lane_id < 255
+                && param_.left_lane_id != param_.right_lane_id) {
                 cv::Mat left_mask = res_label == param_.left_lane_id;
                 cv::Mat right_mask = res_label == param_.right_lane_id;
                 res_label.setTo(param_.right_lane_id, left_mask);
@@ -526,6 +445,55 @@ class ImageSegAugmenter : public ImageAugmenter {
         }
         cvtColor(res, res, CV_HLS2BGR);
     }
+
+    // Warp to data_shape
+    // Pad: int top, int bottom, int left, int right
+    int th = param_.data_shape[1];
+    int tw = param_.data_shape[2];
+    int oh = res.rows;
+    int ow = res.cols;
+    if (1.0 * oh / ow > 1.0 * th / tw) {
+      cv::copyMakeBorder(res, res,
+                         0,
+                         0,
+                         static_cast<int>((1.0 * oh * tw / th - ow) / 2.0),
+                         static_cast<int>((1.0 * oh * tw / th - ow) / 2.0),
+                         cv::BORDER_CONSTANT,
+                         cv::Scalar(param_.fill_value, param_.fill_value, param_.fill_value));
+      cv::copyMakeBorder(res_label, res_label,
+                         0,
+                         0,
+                         static_cast<int>((1.0 * oh * tw / th - ow) / 2.0),
+                         static_cast<int>((1.0 * oh * tw / th - ow) / 2.0),
+                         cv::BORDER_CONSTANT,
+                         cv::Scalar(255));
+    } else if (1.0 * ow / oh > 1.0 * tw / th) {
+      temp_ = res;
+      cv::copyMakeBorder(temp_, res,
+                         static_cast<int>((1.0 * ow * th / tw - oh) / 2.0),
+                         static_cast<int>((1.0 * ow * th / tw - oh) / 2.0),
+                         0,
+                         0,
+                         cv::BORDER_CONSTANT,
+                         cv::Scalar(param_.fill_value, param_.fill_value, param_.fill_value));
+      temp_label_ = res_label;
+      cv::copyMakeBorder(temp_label_, res_label,
+                         static_cast<int>((1.0 * ow * th / tw - oh) / 2.0),
+                         static_cast<int>((1.0 * ow * th / tw - oh) / 2.0),
+                         0,
+                         0,
+                         cv::BORDER_CONSTANT,
+                         cv::Scalar(255));
+    } else {
+      LOG(INFO) << "Same aspect ratio: [" << ow << ", " << oh << "]";
+    }
+    // Resize res, res_label into (tw, th)
+    int interpolation_method = GetInterMethod(param_.inter_method,
+        res.cols, res.rows, tw, th, prnd);
+    cv::resize(res, res, cv::Size(tw, th), 0, 0, interpolation_method);
+    cv::resize(res_label, res_label, cv::Size(tw, th), 0, 0, 0);
+
+    // Ret value
     *out_label = res_label;
     return res;
   }

@@ -37,6 +37,8 @@ DMLC_REGISTER_PARAMETER(PrefetcherParam);
 DMLC_REGISTER_PARAMETER(ImageNormalizeParam);
 DMLC_REGISTER_PARAMETER(ImageRecParserParam);
 DMLC_REGISTER_PARAMETER(ImageRecordParam);
+// DMLC_REGISTER_PARAMETER(ImageSegRecParserParam);
+// DMLC_REGISTER_PARAMETER(ImageSegRecordParam);
 DMLC_REGISTER_PARAMETER(ImageDetNormalizeParam);
 DMLC_REGISTER_PARAMETER(ImageSegNormalizeParam);
 }  // namespace io

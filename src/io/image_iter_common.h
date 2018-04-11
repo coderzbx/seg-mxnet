@@ -347,8 +347,6 @@ struct ImageSegRecParserParam : public dmlc::Parameter<ImageSegRecParserParam> {
     int label_width;
     /*! \brief input shape */
     TShape data_shape;
-    /*! \brief input label shape */
-    TShape label_shape;
     /*! \brief number of threads */
     int preprocess_threads;
     /*! \brief whether to remain silent */
@@ -383,10 +381,7 @@ struct ImageSegRecParserParam : public dmlc::Parameter<ImageSegRecParserParam> {
             DMLC_DECLARE_FIELD(data_shape)
             .set_expect_ndim(3).enforce_nonzero()
             .describe("The shape of one output image in (channels, height, width) format.");
-            DMLC_DECLARE_FIELD(label_shape)
-            .set_expect_ndim(2)
-            .describe("The shape of one output label in (height, width) format.");
-            DMLC_DECLARE_FIELD(preprocess_threads).set_lower_bound(1).set_default(4)
+            DMLC_DECLARE_FIELD(preprocess_threads).set_lower_bound(1).set_default(8)
             .describe("The number of threads to do preprocessing.");
             DMLC_DECLARE_FIELD(verbose).set_default(true)
             .describe("If or not output verbose information.");
@@ -508,11 +503,15 @@ struct PrefetcherParam : public dmlc::Parameter<PrefetcherParam> {
   size_t prefetch_buffer;
   /*! \brief data type */
   dmlc::optional<int> dtype;
+  /*! \brief label id map file */
+  std::string label_map_file;
 
   // declare parameters
   DMLC_DECLARE_PARAMETER(PrefetcherParam) {
     DMLC_DECLARE_FIELD(prefetch_buffer).set_default(4)
         .describe("Maximum number of batches to prefetch.");
+    DMLC_DECLARE_FIELD(label_map_file).set_default("")
+        .describe("file path of map label id");
     DMLC_DECLARE_FIELD(dtype)
       .add_enum("float32", mshadow::kFloat32)
       .add_enum("float64", mshadow::kFloat64)
