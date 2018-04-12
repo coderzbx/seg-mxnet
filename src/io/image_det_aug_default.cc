@@ -670,7 +670,7 @@ class DefaultImageDetAugmenter : public ImageAugmenter {
   }
 
   cv::Mat Process(const cv::Mat &src, const cv::Mat &label, cv::Mat *out_label,
-                  common::RANDOM_ENGINE *prnd) override {
+                  common::RANDOM_ENGINE *prnd, const std::map<int, int>& label_id_map) override {
     using mshadow::index_t;
     cv::Mat res;
     return res;

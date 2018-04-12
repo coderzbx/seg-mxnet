@@ -334,7 +334,7 @@ class ImageSegAugmenter : public ImageAugmenter {
   }
 
   cv::Mat Process(const cv::Mat &src, const cv::Mat &label, cv::Mat *out_label,
-                  common::RANDOM_ENGINE *prnd) override {
+                  common::RANDOM_ENGINE *prnd, const std::map<int, int>& label_id_map) override {
     using mshadow::index_t;
     cv::Mat res;
     cv::Mat res_label;
@@ -493,6 +493,13 @@ class ImageSegAugmenter : public ImageAugmenter {
     cv::resize(res, res, cv::Size(tw, th), 0, 0, interpolation_method);
     cv::resize(res_label, res_label, cv::Size(tw, th), 0, 0, 0);
 
+    // convert labelId
+    res_label.copyTo(map_mat_);
+    for(const auto& i : label_id_map){
+      map_mat_.setTo(i.second, (res_label == i.first));
+    }
+    res_label = map_mat_;
+
     // Ret value
     *out_label = res_label;
     return res;
@@ -504,6 +511,7 @@ class ImageSegAugmenter : public ImageAugmenter {
   cv::Mat temp_label_;
   // rotation param
   cv::Mat rotateM_;
+  cv::Mat map_mat_;
   // parameters
   ImageSegAugmentParam param_;
   /*! \brief list of possible rotate angle */

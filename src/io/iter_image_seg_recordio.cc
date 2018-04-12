@@ -35,10 +35,12 @@
 #include <dmlc/timer.h>
 #include <type_traits>
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
+#include <sstream>
+#include <string>
+#include <fstream>
+#include <iterator>
 #include <map>
+#include <vector>
 
 #if MXNET_USE_LIBJPEG_TURBO
 #include <turbojpeg.h>
@@ -50,12 +52,25 @@
 #include "./inst_vector.h"
 #include "../common/utils.h"
 
+template <class Container>
+void str_split(const std::string& str, Container& cont)
+{
+    std::istringstream iss(str);
+    std::copy(std::istream_iterator<std::string>(iss),
+              std::istream_iterator<std::string>(),
+              std::back_inserter(cont));
+}
+
+
 namespace mxnet {
 namespace io {
 // parser to parse image recordio
 template<typename DType>
 class ImageSegRecordIOParser {
  public:
+  virtual ~ImageSegRecordIOParser(void) {
+      this->ReleaseLabelMap();
+  }
   // initialize the parser
   inline void Init(const std::vector <std::pair<std::string, std::string>> &kwargs);
 
@@ -88,6 +103,8 @@ class ImageSegRecordIOParser {
                              dmlc::InputSplit::Blob *chunk);
 
   inline void CreateMeanImg(void);
+  inline void InitLabelMap(void);
+  inline void ReleaseLabelMap(void);
 
   // magic number to seed prng
   static const int kRandMagic = 111;
@@ -269,6 +286,12 @@ inline void ImageSegRecordIOParser<DType>::Init(
       }
     }
   }
+
+  // Init label map
+  if(label_id_map_.size() == 0 && prefetch_param_.label_map_file.length() != 0){
+    this->InitLabelMap();
+  }
+
 #else
   LOG(FATAL) << "ImageRec need opencv to process";
 #endif
@@ -365,7 +388,8 @@ inline bool ImageSegRecordIOParser<DType>::ParseNext(DataBatch *out) {
                     (current_size + i) * unit_size_[j],
                     (current_size + i + 1) * unit_size_[j]),
                   batch.data[j].get_with_shape<cpu, 1, dtype>(
-                    mshadow::Shape1(unit_size_[j])));
+                    mshadow::Shape1(unit_size_[j]))
+                  );
               });
         }
       }
@@ -512,45 +536,6 @@ inline unsigned ImageSegRecordIOParser<DType>::ParseChunk(DType *data_dptr, real
   dmlc::RecordIOChunkReader reader(*chunk, 0, 1);
   unsigned gl_idx = current_size;
 
-  if (label_id_map_.size() == 0 && prefetch_param_.label_map_file.length() != 0){
-      LOG(INFO) << "LabelMapFile: " << prefetch_param_.label_map_file;
-      FILE *fp = fopen(prefetch_param_.label_map_file.c_str(), "r");
-      if (NULL == fp){
-        LOG(FATAL) << "LabelMapFile "<< prefetch_param_.label_map_file << " is not exist";
-      }else{
-        char szLine[128] = {0};
-        while(!feof(fp)){
-          memset(szLine, 0, sizeof(szLine));
-          fgets(szLine, sizeof(szLine) - 1, fp); // include enter line
-
-          std::string s = szLine;
-          s.erase(0,s.find_first_not_of(" "));
-          s.erase(s.find_last_not_of(" ") + 1);
-          s.erase(0,s.find_first_not_of("\n"));
-          s.erase(s.find_last_not_of("\n") + 1);
-
-          int pos = s.find("\t");
-          if(pos != -1){
-            std::string id1 = s.substr(0, pos);
-            int num_id1 = atoi(id1.c_str());
-            int pos1 = s.find("\t", pos+1);
-            if (pos1 != -1){
-              std::string id2 = s.substr(pos+1, pos1);
-              int num_id2 = atoi(id2.c_str());
-              label_id_map_.insert(std::pair<int, int>(num_id1, num_id2));
-            }
-          }
-          LOG(INFO) << s.c_str();
-        }
-      }
-
-      auto iter = label_id_map_.begin();
-      while (iter != label_id_map_.end()){
-        LOG(INFO) << "ID1: "<< iter->first << "=> ID2: "<< iter->second;
-        ++iter;
-      }
-  }
-
 #pragma omp parallel num_threads(param_.preprocess_threads)
   {
     CHECK(omp_get_num_threads() == param_.preprocess_threads);
@@ -614,15 +599,7 @@ inline unsigned ImageSegRecordIOParser<DType>::ParseChunk(DType *data_dptr, real
 
       cv::Mat out_label;
       for (auto& aug : augmenters_[tid]) {
-        res = aug->Process(res, res_label, &out_label, prnds_[tid].get());
-      }
-
-      auto iter = label_id_map_.begin();
-      while (iter != label_id_map_.end()){
-        cv::Mat _mask = out_label == iter->first;
-        out_label.setTo(iter->second, _mask);
-
-        ++iter;
+        res = aug->Process(res, res_label, &out_label, prnds_[tid].get(), label_id_map_);
       }
 
       mshadow::Tensor<cpu, 3, DType> data;
@@ -678,6 +655,31 @@ inline unsigned ImageSegRecordIOParser<DType>::ParseChunk(DType *data_dptr, real
   LOG(FATAL) << "Opencv is needed for image decoding and augmenting.";
   return 0;
 #endif
+}
+
+template<typename DType>
+inline void ImageSegRecordIOParser<DType>::InitLabelMap(void){
+    LOG(INFO) << "LabelMapFile: " << prefetch_param_.label_map_file;
+
+    std::ifstream infile(prefetch_param_.label_map_file.c_str());
+    std::string line_str;
+    std::vector<std::string> contents;
+    while (std::getline(infile, line_str)) {
+        str_split(line_str, contents);
+        if (contents.size() < 2){
+            continue;
+        }
+        int num_id1 = atoi(contents[0].c_str());
+        int num_id2 = atoi(contents[1].c_str());
+        label_id_map_.insert(std::pair<int, int>(num_id1, num_id2));
+        contents.clear();
+    }
+}
+
+template<typename DType>
+inline void ImageSegRecordIOParser<DType>::ReleaseLabelMap(void){
+    LOG(INFO) << "Release Label Map";
+    label_id_map_.clear();
 }
 
 // create mean image.

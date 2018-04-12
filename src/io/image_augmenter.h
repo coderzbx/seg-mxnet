@@ -61,7 +61,7 @@ class ImageAugmenter {
                           common::RANDOM_ENGINE *prnd) = 0;
 
   virtual cv::Mat Process(const cv::Mat &src, const cv::Mat &label, cv::Mat *out_label,
-                  common::RANDOM_ENGINE *prnd) = 0;
+                  common::RANDOM_ENGINE *prnd, const std::map<int, int>& label_id_map) = 0;
   // virtual destructor
   virtual ~ImageAugmenter() {}
   /*!
