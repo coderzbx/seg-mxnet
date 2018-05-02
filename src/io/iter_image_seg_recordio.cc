@@ -324,7 +324,9 @@ inline bool ImageSegRecordIOParser<DType>::ParseNext(DataBatch *out) {
 
     shape_vec.clear();
     shape_vec.push_back(batch_param_.batch_size);
-    TShape input_label_shape = mshadow::Shape2(param_.data_shape[1], param_.data_shape[2]);
+    TShape input_label_shape = mshadow::Shape2(
+            int(param_.data_shape[1] * param_.label_scale),
+            int(param_.data_shape[2] * param_.label_scale));
     for (index_t dim = 0; dim < input_label_shape.ndim(); ++dim) {
       shape_vec.push_back(input_label_shape[dim]);
     }

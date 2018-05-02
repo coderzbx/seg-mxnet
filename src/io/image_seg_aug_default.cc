@@ -65,6 +65,8 @@ struct ImageSegAugmentParam : public dmlc::Parameter<ImageSegAugmentParam> {
     int right_lane_id;
     /*! \brief shape of the image data*/
     TShape data_shape;
+    /*! \brief scale of label data, must be divisible by 1*/
+    float label_scale;
 
     // declare parameters
     DMLC_DECLARE_PARAMETER(ImageSegAugmentParam) {
@@ -133,6 +135,8 @@ struct ImageSegAugmentParam : public dmlc::Parameter<ImageSegAugmentParam> {
             .describe("Switch left_lane_id and right_lane_id if need to flip");
             DMLC_DECLARE_FIELD(right_lane_id).set_default(-1)
             .describe("Switch left_lane_id and right_lane_id if need to flip");
+            DMLC_DECLARE_FIELD(label_scale).set_default(1.0f)
+            .describe("scale of label data, must be divisible by 1");
     }
 };
 
@@ -499,6 +503,14 @@ class ImageSegAugmenter : public ImageAugmenter {
       map_mat_.setTo(i.second, (res_label == i.first));
     }
     res_label = map_mat_;
+
+    // scale label
+    if (param_.label_scale > 0.0){
+        int new_th = int(th * param_.label_scale);
+        int new_tw = int(tw * param_.label_scale);
+
+        cv::resize(res_label, res_label, cv::Size(new_tw, new_th), 0, 0, 0);
+    }
 
     // Ret value
     *out_label = res_label;
