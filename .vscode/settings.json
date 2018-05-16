@@ -42,6 +42,8 @@
         "future": "cpp",
         "tuple": "cpp",
         "cmath": "cpp",
-        "complex": "cpp"
+        "complex": "cpp",
+        "__bit_reference": "cpp",
+        "chrono": "cpp"
     }
 }

@@ -52,7 +52,7 @@ class LabelTransferOp : public Operator {
     using namespace mshadow::expr;
     CHECK_EQ(in_data.size(), 1U) << "LabelTransfer Input: [label]";
     CHECK_EQ(out_data.size(), 1U) << "LabelTransfer Output: [output]";
-    CHECK_EQ(ids_.size()%2, 0) << "ids count divide by 2";
+    // CHECK_EQ(ids_.size()%2, 0) << "ids count divide by 2";
     Stream<xpu> *s = ctx.get_stream<xpu>();
     int n = in_data[label_transfer_enum::kData].size(0);
     int k = in_data[label_transfer_enum::kData].Size()/n;
