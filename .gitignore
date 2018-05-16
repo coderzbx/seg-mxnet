@@ -1,0 +1,8 @@
+build/*
+*.bak
+bin/*
+lib/*
+*.log
+*.txt
+*.out
+cmake-build-debug/*
